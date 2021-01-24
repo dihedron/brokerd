@@ -4,8 +4,8 @@
 *.so
 # executables
 
-hraftd
-**/hraftd
+brokerd
+**/brokerd
 
 # Folders
 _obj
