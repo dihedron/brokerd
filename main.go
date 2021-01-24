@@ -3,15 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 
+	"github.com/jessevdk/go-flags" 
+	"go.uber.org/zap"
 	"github.com/dihedron/brokerd/http"
 	"github.com/dihedron/brokerd/store"
+	"github.com/dihedron/brokerd/log"
 )
 
 // Command line defaults
@@ -20,75 +21,66 @@ const (
 	DefaultRaftAddr = ":12000"
 )
 
-// Command line parameters
-var inmem bool
-var httpAddr string
-var raftAddr string
-var joinAddr string
-var nodeID string
-
-func init() {
-	flag.BoolVar(&inmem, "inmem", false, "Use in-memory storage for Raft")
-	flag.StringVar(&httpAddr, "haddr", DefaultHTTPAddr, "Set the HTTP bind address")
-	flag.StringVar(&raftAddr, "raddr", DefaultRaftAddr, "Set Raft bind address")
-	flag.StringVar(&joinAddr, "join", "", "Set join address, if any")
-	flag.StringVar(&nodeID, "id", "", "Node ID")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [options] <raft-data-path> \n", os.Args[0])
-		flag.PrintDefaults()
-	}
+type Options struct {
+	NodeID 		string `short:"i" long:"id" description:"The unique ID of the node." required:"yes"`
+	HTTPAddress string `short:"h" long:"http" description:"Address to listen on for HTTP connections." default:"127.0.0.1:11000"`
+	RaftAddress     string `short:"r" long:"raft" description:"Address to listen on for Raft RPC." default:"127.0.0.1:12000"`
+	JoinAddress  string `short:"j" long:"join" description:"Address of the Raft leader." optional:"yes"`
+	RaftDir string `short:"d" long:"dir" description:"Directory to store the Raft state in." required:"yes"`
+	Storage string `short:"s" long:"storage" description:"Kind of storage to use for Raft." choice:"memory" choice:"boltdb" default:"boltdb" optional:"yes"`
 }
 
 func main() {
-	flag.Parse()
+	defer log.L.Sync()
 
-	if flag.NArg() == 0 {
-		fmt.Fprintf(os.Stderr, "No Raft storage directory specified\n")
+	options := Options{}
+
+	parser := flags.NewParser(&options, flags.Default)
+	if _, err := parser.Parse(); err != nil {
+		log.L.Error("failure parsing command line", zap.Error(err))
 		os.Exit(1)
 	}
 
-	// Ensure Raft storage exists.
-	raftDir := flag.Arg(0)
-	if raftDir == "" {
-		fmt.Fprintf(os.Stderr, "No Raft storage directory specified\n")
-		os.Exit(1)
-	}
-	os.MkdirAll(raftDir, 0700)
+	log.L.Info("raft state directory", zap.String("path", options.RaftDir))
+	os.MkdirAll(options.RaftDir, 0700)
 
-	s := store.New(inmem)
-	s.RaftDir = raftDir
-	s.RaftBind = raftAddr
-	if err := s.Open(joinAddr == "", nodeID); err != nil {
-		log.Fatalf("failed to open store: %s", err.Error())
+	s := store.New(options.Storage == "memory")
+	s.RaftDir = options.RaftDir
+	s.RaftBind = options.RaftAddress
+	if err := s.Open(options.JoinAddress == "", options.NodeID); err != nil {
+		log.L.Error("failed to open store", zap.Error(err))
 	}
 
-	h := httpd.New(httpAddr, s)
+	h := httpd.New(options.HTTPAddress, s)
 	if err := h.Start(); err != nil {
-		log.Fatalf("failed to start HTTP service: %s", err.Error())
+		log.L.Error("failed to start HTTP service", zap.Error(err))
+		os.Exit(1)
 	}
 
 	// If join was specified, make the join request.
-	if joinAddr != "" {
-		if err := join(joinAddr, raftAddr, nodeID); err != nil {
-			log.Fatalf("failed to join node at %s: %s", joinAddr, err.Error())
+	if options.JoinAddress != "" {
+		if err := join(options.JoinAddress, options.RaftAddress, options.NodeID); err != nil {
+			log.L.Error("failed to join node", zap.String("join address", options.JoinAddress), zap.Error(err))
 		}
 	}
 
-	log.Println("hraftd started successfully")
+	log.L.Info("application started successfully")
 
 	terminate := make(chan os.Signal, 1)
 	signal.Notify(terminate, os.Interrupt)
 	<-terminate
-	log.Println("hraftd exiting")
+	log.L.Info("application exiting")
 }
 
 func join(joinAddr, raftAddr, nodeID string) error {
 	b, err := json.Marshal(map[string]string{"addr": raftAddr, "id": nodeID})
 	if err != nil {
+		log.L.Error("failure marshalling join request nody to JSON", zap.Error(err))
 		return err
 	}
 	resp, err := http.Post(fmt.Sprintf("http://%s/join", joinAddr), "application-type/json", bytes.NewReader(b))
 	if err != nil {
+		log.L.Error("failure sending join request", zap.String("join address", joinAddr), zap.Error(err))
 		return err
 	}
 	defer resp.Body.Close()
