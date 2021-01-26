@@ -5,10 +5,12 @@ package httpd
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/dihedron/brokerd/log"
+	"go.uber.org/zap"
 )
 
 // Store is the interface Raft-backed key-value stores must implement.
@@ -59,7 +61,7 @@ func (s *Service) Start() error {
 	go func() {
 		err := server.Serve(s.ln)
 		if err != nil {
-			log.Fatalf("HTTP serve: %s", err)
+			log.L.Error("HTTP serve error", zap.Error(err))
 		}
 	}()
 

@@ -8,11 +8,11 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/jessevdk/go-flags" 
-	"go.uber.org/zap"
-	"github.com/dihedron/brokerd/http"
-	"github.com/dihedron/brokerd/store"
+	httpd "github.com/dihedron/brokerd/http"
 	"github.com/dihedron/brokerd/log"
+	"github.com/dihedron/brokerd/store"
+	"github.com/jessevdk/go-flags"
+	"go.uber.org/zap"
 )
 
 // Command line defaults
@@ -21,13 +21,13 @@ const (
 	DefaultRaftAddr = ":12000"
 )
 
+// Options are the application startup options.
 type Options struct {
-	NodeID 		string `short:"i" long:"id" description:"The unique ID of the node." required:"yes"`
+	NodeID      string `short:"i" long:"id" description:"The unique ID of the node." required:"yes"`
 	HTTPAddress string `short:"h" long:"http" description:"Address to listen on for HTTP connections." default:"127.0.0.1:11000"`
-	RaftAddress     string `short:"r" long:"raft" description:"Address to listen on for Raft RPC." default:"127.0.0.1:12000"`
-	JoinAddress  string `short:"j" long:"join" description:"Address of the Raft leader." optional:"yes"`
-	RaftDir string `short:"d" long:"dir" description:"Directory to store the Raft state in." required:"yes"`
-	Storage string `short:"s" long:"storage" description:"Kind of storage to use for Raft." choice:"memory" choice:"boltdb" default:"boltdb" optional:"yes"`
+	RaftAddress string `short:"r" long:"raft" description:"Address to listen on for Raft RPC." default:"127.0.0.1:12000"`
+	JoinAddress string `short:"j" long:"join" description:"Address of the Raft leader." optional:"yes"`
+	RaftDir     string `short:"d" long:"dir" description:"Directory to store the Raft state in." required:"yes"`
 }
 
 func main() {
@@ -42,9 +42,9 @@ func main() {
 	}
 
 	log.L.Info("raft state directory", zap.String("path", options.RaftDir))
-	os.MkdirAll(options.RaftDir, 0700)
+	os.MkdirAll(options.RaftDir, 0o700)
 
-	s := store.New(options.Storage == "memory")
+	s := store.New()
 	s.RaftDir = options.RaftDir
 	s.RaftBind = options.RaftAddress
 	if err := s.Open(options.JoinAddress == "", options.NodeID); err != nil {

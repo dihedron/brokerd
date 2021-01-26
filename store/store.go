@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/hashicorp/raft-boltdb"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
 )
 
 const (
@@ -37,7 +37,6 @@ type command struct {
 type Store struct {
 	RaftDir  string
 	RaftBind string
-	inmem    bool
 
 	mu sync.Mutex
 	m  map[string]string // The key-value store for the system.
@@ -48,10 +47,9 @@ type Store struct {
 }
 
 // New returns a new Store.
-func New(inmem bool) *Store {
+func New() *Store {
 	return &Store{
 		m:      make(map[string]string),
-		inmem:  inmem,
 		logger: log.New(os.Stderr, "[store] ", log.LstdFlags),
 	}
 }
@@ -64,7 +62,7 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(localID)
 
-	// Setup Raft communication.
+	// setup Raft communication
 	addr, err := net.ResolveTCPAddr("tcp", s.RaftBind)
 	if err != nil {
 		return err
@@ -83,17 +81,12 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 	// Create the log store and stable store.
 	var logStore raft.LogStore
 	var stableStore raft.StableStore
-	if s.inmem {
-		logStore = raft.NewInmemStore()
-		stableStore = raft.NewInmemStore()
-	} else {
-		boltDB, err := raftboltdb.NewBoltStore(filepath.Join(s.RaftDir, "raft.db"))
-		if err != nil {
-			return fmt.Errorf("new bolt store: %s", err)
-		}
-		logStore = boltDB
-		stableStore = boltDB
+	boltDB, err := raftboltdb.NewBoltStore(filepath.Join(s.RaftDir, "raft.db"))
+	if err != nil {
+		return fmt.Errorf("new bolt store: %s", err)
 	}
+	logStore = boltDB
+	stableStore = boltDB
 
 	// Instantiate the Raft systems.
 	ra, err := raft.NewRaft(config, (*fsm)(s), logStore, stableStore, snapshots, transport)
@@ -279,7 +272,6 @@ func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 		// Close the sink.
 		return sink.Close()
 	}()
-
 	if err != nil {
 		sink.Cancel()
 	}
