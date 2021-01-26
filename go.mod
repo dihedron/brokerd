@@ -2,8 +2,6 @@ module github.com/dihedron/brokerd
 
 go 1.15
 
-replace github.com/hashicorp/raft-boltdb => github.com/dihedron/raft-boltdb v0.0.0-20210115232206-5b95c94bbbce
-
 require (
 	github.com/armon/go-metrics v0.3.6 // indirect
 	github.com/fatih/color v1.10.0 // indirect
@@ -17,3 +15,5 @@ require (
 	go.uber.org/zap v1.16.0
 	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c // indirect
 )
+
+replace github.com/hashicorp/raft-boltdb => github.com/dihedron/raft-boltdb v0.0.0-20210115232206-5b95c94bbbce
