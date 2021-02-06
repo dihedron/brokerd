@@ -8,23 +8,31 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3" // load sqlite3 drivers
+
+	"github.com/dihedron/brokerd/log"
+	"github.com/dihedron/brokerd/migrations"
+	"github.com/dihedron/brokerd/sqlite"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
+	"go.uber.org/zap"
 )
 
 const (
-	retainSnapshotCount = 2
-	raftTimeout         = 10 * time.Second
+	// DefaultRetainSnapshotCount is the default number of snaphots
+	// to keep.
+	DefaultRetainSnapshotCount = 2
+	// DefaultRaftTimeout is the default timeout of the Raft cluster.
+	DefaultRaftTimeout = 10 * time.Second
 )
 
 type command struct {
@@ -35,30 +43,44 @@ type command struct {
 
 // Store is a simple key-value store, where all changes are made via Raft consensus.
 type Store struct {
-	RaftDir  string
+	// RaftDir is the directory where the Raft protocol files
+	// will be kept.
+	RaftDir string
+	// RaftBind is the ...
 	RaftBind string
+	// db is the database for the FSM.
+	db *sql.DB
+	// raft is the Raft consensus mechanism.
+	raft *raft.Raft
 
-	mu sync.Mutex
-	m  map[string]string // The key-value store for the system.
-
-	raft *raft.Raft // The consensus mechanism
-
-	logger *log.Logger
+	// mu sync.Mutex
+	// m  map[string]string // The key-value store for the system.
 }
 
 // New returns a new Store.
 func New() *Store {
-	return &Store{
-		m:      make(map[string]string),
-		logger: log.New(os.Stderr, "[store] ", log.LstdFlags),
-	}
+	return &Store{}
 }
 
 // Open opens the store. If enableSingle is set, and there are no existing peers,
 // then this node becomes the first node, and therefore leader, of the cluster.
 // localID should be the server identifier for this node.
 func (s *Store) Open(enableSingle bool, localID string) error {
-	// Setup Raft configuration.
+	// open the local database
+	db, err := sqlite.InitDB(filepath.Join(s.RaftDir, "sqlite3.db"), migrations.Migrations)
+	if err != nil {
+		log.L.Error("error opening database", zap.Error(err))
+		return err
+	}
+	// test the connection
+	if err = db.Ping(); err != nil {
+		log.L.Error("cannot ping database", zap.Error(err))
+		return err
+	}
+	s.db = db
+	log.L.Debug("database loaded")
+
+	// setup Raft configuration
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(localID)
 
@@ -72,13 +94,13 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 		return err
 	}
 
-	// Create the snapshot store. This allows the Raft to truncate the log.
-	snapshots, err := raft.NewFileSnapshotStore(s.RaftDir, retainSnapshotCount, os.Stderr)
+	// create the snapshot store; this allows the Raft to truncate the log
+	snapshots, err := raft.NewFileSnapshotStore(s.RaftDir, DefaultRetainSnapshotCount, os.Stderr)
 	if err != nil {
 		return fmt.Errorf("file snapshot store: %s", err)
 	}
 
-	// Create the log store and stable store.
+	// create the log store and stable store
 	var logStore raft.LogStore
 	var stableStore raft.StableStore
 	boltDB, err := raftboltdb.NewBoltStore(filepath.Join(s.RaftDir, "raft.db"))
@@ -88,7 +110,7 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 	logStore = boltDB
 	stableStore = boltDB
 
-	// Instantiate the Raft systems.
+	// instantiate the Raft systems
 	ra, err := raft.NewRaft(config, (*fsm)(s), logStore, stableStore, snapshots, transport)
 	if err != nil {
 		return fmt.Errorf("new raft: %s", err)
@@ -112,9 +134,15 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 
 // Get returns the value for the given key.
 func (s *Store) Get(key string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.m[key], nil
+	value := ""
+	err := s.db.QueryRow("select value from store where key=?", key).Scan(&value)
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+	// s.mu.Lock()
+	// defer s.mu.Unlock()
+	// return s.m[key], nil
 }
 
 // Set sets the value for the given key.
@@ -133,7 +161,7 @@ func (s *Store) Set(key, value string) error {
 		return err
 	}
 
-	f := s.raft.Apply(b, raftTimeout)
+	f := s.raft.Apply(b, DefaultRaftTimeout)
 	return f.Error()
 }
 
@@ -152,18 +180,18 @@ func (s *Store) Delete(key string) error {
 		return err
 	}
 
-	f := s.raft.Apply(b, raftTimeout)
+	f := s.raft.Apply(b, DefaultRaftTimeout)
 	return f.Error()
 }
 
 // Join joins a node, identified by nodeID and located at addr, to this store.
 // The node must be ready to respond to Raft communications at that address.
 func (s *Store) Join(nodeID, addr string) error {
-	s.logger.Printf("received join request for remote node %s at %s", nodeID, addr)
+	log.L.Info("received join request for remote node", zap.String("nodeID", nodeID), zap.String("address", addr))
 
 	configFuture := s.raft.GetConfiguration()
 	if err := configFuture.Error(); err != nil {
-		s.logger.Printf("failed to get raft configuration: %v", err)
+		log.LError("failed to get raft configuration", zap.Error(err))
 		return err
 	}
 
@@ -174,7 +202,7 @@ func (s *Store) Join(nodeID, addr string) error {
 			// However if *both* the ID and the address are the same, then nothing -- not even
 			// a join operation -- is needed.
 			if srv.Address == raft.ServerAddress(addr) && srv.ID == raft.ServerID(nodeID) {
-				s.logger.Printf("node %s at %s already member of cluster, ignoring join request", nodeID, addr)
+				log.L.Debug("node is already member of cluster, ignoring join request", zap.String("nodeID", nodeID), zap.String("address", addr))
 				return nil
 			}
 
@@ -189,7 +217,7 @@ func (s *Store) Join(nodeID, addr string) error {
 	if f.Error() != nil {
 		return f.Error()
 	}
-	s.logger.Printf("node %s at %s joined successfully", nodeID, addr)
+	log.L.Info("node joined successfully", zap.String("nodeID", nodeID), zap.String("address", addr))
 	return nil
 }
 
@@ -214,6 +242,27 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 
 // Snapshot returns a snapshot of the key-value store.
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
+
+	tx, err := f.db.Begin()
+	if err != nil {
+		log.L.Error("error opening transaction", zap.Error(err))
+		return nil, err
+	}
+
+	rows, err := tx.Query("SELECT key, value FROM pairs")
+	if err != nil {
+		log.L.Error("error running query", zap.Error(err))
+		return nil, err
+	}
+
+	return &fsmSnapshot{
+		db:   f.db,
+		tx:   tx,
+		rows: rows,
+	}
+
+	tx.Commit()
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -239,44 +288,33 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 }
 
 func (f *fsm) applySet(key, value string) interface{} {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.m[key] = value
+	tx, err := f.db.Begin()
+	if err != nil {
+		log.L.Error("error opening transaction", zap.Error(err))
+		return err
+	}
+	_, err = f.db.Exec("INSERT INTO pairs (key,value) VALUES (?,?)", key, value)
+	if err != nil {
+		log.L.Error("error inserting value into database", zap.String("key", key), zap.String("value", value), zap.Error(err))
+		return err
+	}
+	tx.Commit()
+	log.L.Debug("value stored into database", zap.String("key", key), zap.String("value", value))
 	return nil
 }
 
 func (f *fsm) applyDelete(key string) interface{} {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.m, key)
+	tx, err := f.db.Begin()
+	if err != nil {
+		log.L.Error("error opening transaction", zap.Error(err))
+		return err
+	}
+	_, err = f.db.Exec("DELETE FROM pairs where key=?", key)
+	if err != nil {
+		log.L.Error("error deleting pair", zap.String("key", key), zap.Error(err))
+		return err
+	}
+	tx.Commit()
+	log.L.Debug("value deleted from database", zap.String("key", key))
 	return nil
 }
-
-type fsmSnapshot struct {
-	store map[string]string
-}
-
-func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
-	err := func() error {
-		// Encode data.
-		b, err := json.Marshal(f.store)
-		if err != nil {
-			return err
-		}
-
-		// Write data to sink.
-		if _, err := sink.Write(b); err != nil {
-			return err
-		}
-
-		// Close the sink.
-		return sink.Close()
-	}()
-	if err != nil {
-		sink.Cancel()
-	}
-
-	return err
-}
-
-func (f *fsmSnapshot) Release() {}
