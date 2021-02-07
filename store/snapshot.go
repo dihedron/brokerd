@@ -3,7 +3,6 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 
 	"github.com/dihedron/brokerd/log"
 	"github.com/hashicorp/raft"
@@ -25,43 +24,51 @@ type pair struct {
 func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 	log.L.Debug("persisting snapshot...")
 
-	pairs := []pair{}
-
-	defer f.rows.Close()
-	for f.rows.Next() {
-		var key string
-		var value string
-		err := f.rows.Scan(&key, &value)
-		if err != nil {
-			log.L.Error("error reading value from database", zap.Error(err))
-		}
-		fmt.Println(id, name)
-	}
-	err = rows.Err()
-	if err != nil {
-		log.Fatal(err)
-	}
-	// defer sink.Close()
-
-	// TODO: read all rows, create an array and then dump as JSON (for simplicity).
-	// once this works, use protobuf instead.
-
+	// run the transaction inside a nested function, so
+	// if anything goes wrong we can capture the error and
+	// cancel the snapshot; the nested function must either
+	// commit the transaction, write to the sink and close it,
+	// or return an error so the transaction is rolled back
+	// and the sink can be closed.
 	err := func() error {
-		// Encode data.
-		b, err := json.Marshal(f.store)
+		pairs := []pair{}
+		// loop over the rows and scan them one by one, adding them
+		// to the slice; then marshal the slice to JSON and write it
+		// out to the sink.
+		defer f.rows.Close()
+		for f.rows.Next() {
+			var key string
+			var value string
+			if err := f.rows.Scan(&key, &value); err != nil {
+				log.L.Error("error reading value from database", zap.Error(err))
+				return err
+			}
+			pairs = append(pairs, pair{Key: key, Value: value})
+			log.L.Debug("adding pair to snapshot", zap.String("key", key), zap.String("value", value))
+		}
+		if err := f.rows.Err(); err != nil {
+			log.L.Error("error reading rows", zap.Error(err))
+			return err
+		}
+		// encode data as JSON
+		data, err := json.MarshalIndent(pairs, "", "  ")
 		if err != nil {
+			log.L.Error("error marshalling snapshot to JSON", zap.Error(err))
 			return err
 		}
-
-		// Write data to sink.
-		if _, err := sink.Write(b); err != nil {
+		// write data to sink
+		if _, err := sink.Write(data); err != nil {
+			log.L.Error("error writing snapshot to sink", zap.Error(err))
 			return err
 		}
-
-		// Close the sink.
+		// commit the transaction
+		f.tx.Commit()
+		// close the sink
 		return sink.Close()
 	}()
 	if err != nil {
+		log.L.Error("an error occurred, snapshot cancelled", zap.Error(err))
+		f.tx.Rollback()
 		sink.Cancel()
 	}
 

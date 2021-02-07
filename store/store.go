@@ -8,6 +8,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -134,11 +135,23 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 
 // Get returns the value for the given key.
 func (s *Store) Get(key string) (string, error) {
-	value := ""
-	err := s.db.QueryRow("select value from store where key=?", key).Scan(&value)
+
+	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelDefault,
+		ReadOnly:  true,
+	})
 	if err != nil {
+		log.L.Error("error opening read-only transaction", zap.Error(err))
+		tx.Rollback()
 		return "", err
 	}
+	value := ""
+	if err := tx.QueryRow("SELECT value FROM pairs WHERE key=?", key).Scan(&value); err != nil {
+		log.L.Error("error querying row", zap.String("key", key), zap.Error(err))
+		tx.Rollback()
+		return "", err
+	}
+	tx.Commit()
 	return value, nil
 	// s.mu.Lock()
 	// defer s.mu.Unlock()
@@ -191,7 +204,7 @@ func (s *Store) Join(nodeID, addr string) error {
 
 	configFuture := s.raft.GetConfiguration()
 	if err := configFuture.Error(); err != nil {
-		log.LError("failed to get raft configuration", zap.Error(err))
+		log.L.Error("failed to get raft configuration", zap.Error(err))
 		return err
 	}
 
@@ -243,15 +256,22 @@ func (f *fsm) Apply(l *raft.Log) interface{} {
 // Snapshot returns a snapshot of the key-value store.
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 
-	tx, err := f.db.Begin()
+	// SQLite3 has a SERIALIZABLE isolation level by default;
+	// in order to allow concurrent Apply() to proceed we declare
+	// this transaction as ReadOnly.
+	tx, err := f.db.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelDefault,
+		ReadOnly:  true,
+	})
 	if err != nil {
 		log.L.Error("error opening transaction", zap.Error(err))
 		return nil, err
 	}
-
+	// run the query now and keep the cursor open
 	rows, err := tx.Query("SELECT key, value FROM pairs")
 	if err != nil {
 		log.L.Error("error running query", zap.Error(err))
+		tx.Rollback()
 		return nil, err
 	}
 
@@ -259,41 +279,69 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 		db:   f.db,
 		tx:   tx,
 		rows: rows,
-	}
-
-	tx.Commit()
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// Clone the map.
-	o := make(map[string]string)
-	for k, v := range f.m {
-		o[k] = v
-	}
-	return &fsmSnapshot{store: o}, nil
+	}, nil
 }
 
 // Restore stores the key-value store to a previous state.
 func (f *fsm) Restore(rc io.ReadCloser) error {
-	o := make(map[string]string)
-	if err := json.NewDecoder(rc).Decode(&o); err != nil {
+	// o := make(map[string]string)
+	f.db.Begin()
+	pairs := []pair{}
+	if err := json.NewDecoder(rc).Decode(&pairs); err != nil {
+		log.L.Error("error unmarshaling JSON to snapshot contents", zap.Error(err))
 		return err
 	}
-
-	// Set the state from the snapshot, no lock required according to
-	// Hashicorp docs.
-	f.m = o
-	return nil
-}
-
-func (f *fsm) applySet(key, value string) interface{} {
-	tx, err := f.db.Begin()
+	tx, err := f.db.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelDefault,
+		ReadOnly:  false,
+	})
 	if err != nil {
 		log.L.Error("error opening transaction", zap.Error(err))
 		return err
 	}
-	_, err = f.db.Exec("INSERT INTO pairs (key,value) VALUES (?,?)", key, value)
+
+	if _, err := tx.Exec("DELETE FROM pairs;"); err != nil {
+		log.L.Error("error truncating table")
+		tx.Rollback()
+		return err
+	}
+	stmt, err := tx.Prepare("INSERT INTO pairs (key,value) VALUES (?,?)")
+	if err != nil {
+		log.L.Error("error preparing insert statement", zap.Error(err))
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+
+	for _, pair := range pairs {
+		if _, err = stmt.Exec(pair.Key, pair.Value); err != nil {
+			log.L.Error("error executing statement", zap.Error(err))
+			break
+		}
+	}
+	if err != nil {
+		log.L.Error("error restoring snaphot", zap.Error(err))
+		tx.Rollback()
+	}
+	log.L.Debug("restore complete, committing transaction")
+	tx.Commit()
+
+	// Set the state from the snapshot, no lock required according to
+	// Hashicorp docs.
+	// f.m = o
+	return nil
+}
+
+func (f *fsm) applySet(key, value string) interface{} {
+	tx, err := f.db.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelDefault,
+		ReadOnly:  false,
+	})
+	if err != nil {
+		log.L.Error("error opening transaction", zap.Error(err))
+		return err
+	}
+	_, err = f.db.Exec("INSERT OR REPLACE INTO pairs (key,value) VALUES (?,?)", key, value)
 	if err != nil {
 		log.L.Error("error inserting value into database", zap.String("key", key), zap.String("value", value), zap.Error(err))
 		return err
@@ -304,7 +352,10 @@ func (f *fsm) applySet(key, value string) interface{} {
 }
 
 func (f *fsm) applyDelete(key string) interface{} {
-	tx, err := f.db.Begin()
+	tx, err := f.db.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelDefault,
+		ReadOnly:  false,
+	})
 	if err != nil {
 		log.L.Error("error opening transaction", zap.Error(err))
 		return err
