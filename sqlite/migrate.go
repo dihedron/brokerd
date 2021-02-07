@@ -116,7 +116,7 @@ func migrateFile(db *sql.DB, migrations fs.FS, name string) error {
 		log.L.Error("error reading migrations table", zap.String("name", name), zap.Error(err))
 		return err
 	} else if n != 0 {
-		log.L.Debug("mmigration already applied, skipping", zap.String("name", name))
+		log.L.Debug("migration already applied, skipping", zap.String("name", name))
 		return nil // already run migration, skip
 	}
 
