@@ -135,7 +135,6 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 
 // Get returns the value for the given key.
 func (s *Store) Get(key string) (string, error) {
-
 	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelDefault,
 		ReadOnly:  true,
@@ -152,6 +151,7 @@ func (s *Store) Get(key string) (string, error) {
 		return "", err
 	}
 	tx.Commit()
+	log.L.Debug("returning value", zap.String("key", key), zap.String("value", value))
 	return value, nil
 	// s.mu.Lock()
 	// defer s.mu.Unlock()
