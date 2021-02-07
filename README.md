@@ -1,44 +1,51 @@
-_For background on this project check out this [blog post](http://www.philipotoole.com/building-a-distributed-key-value-store-using-raft/)._
 
-hraftd [![Circle CI](https://circleci.com/gh/otoolep/hraftd/tree/master.svg?style=svg)](https://circleci.com/gh/otoolep/hraftd/tree/master) [![appveyor](https://ci.appveyor.com/api/projects/status/github/otoolep/hraftd?branch=master&svg=true)](https://ci.appveyor.com/project/otoolep/hraftd) [![GoDoc](https://godoc.org/github.com/otoolep/hraftd?status.png)](https://godoc.org/github.com/otoolep/hraftd) [![Go Report Card](https://goreportcard.com/badge/github.com/otoolep/hraftd)](https://goreportcard.com/report/github.com/otoolep/hraftd)
-======
 
-hraftd is a reference example use of the [Hashicorp Raft implementation v1.0](https://github.com/hashicorp/raft). [Raft](https://raft.github.io/) is a _distributed consensus protocol_, meaning its purpose is to ensure that a set of nodes -- a cluster -- agree on the state of some arbitrary state machine, even when nodes are vulnerable to failure and network partitions. Distributed consensus is a fundamental concept when it comes to building fault-tolerant systems.
+`brokerd` is a hard fork of Philip O'Tooles [`hraftd`](http://github.com/otoolep/hraftd); it borrows the code structure -- which makes it extremely easy to study and understand the inner workings of a Raft cluster -- and extends it in order to demonstrate the use of SQLite3 as the persistent store behind the Finite State Machine, and to apply techniques such as automatic DB schema migration, automatic request redirection from Followers to the current Leader, and Raft cluster control via web APIs.  
 
-A simple example system like hraftd makes it easy to study the Raft consensus protocol in general, and Hashicorp's Raft implementation in particular. It can be run on Linux, OSX, and Windows.
+For a background on `hraftd` check out Philip O'Tooles' [blog post](http://www.philipotoole.com/building-a-distributed-key-value-store-using-raft/).
+
+
+`brokerd` makes use of the [Hashicorp Raft implementation v1.0](https://github.com/hashicorp/raft). [Raft](https://raft.github.io/) is a _distributed consensus protocol_, meaning its purpose is to ensure that a set of nodes -- a cluster -- agree on the state of some arbitrary finite state machine, even when nodes are vulnerable to failure and network partitions. Distributed consensus is a fundamental concept when it comes to building fault-tolerant distributed systems.
+
+A simple example system like `brokerd` makes it easy to study the Raft consensus protocol in general, and Hashicorp's Raft implementation in particular. It can be run on Linux, OSX, and Windows.
 
 ## Reading and writing keys
 
-The reference implementation is a very simple in-memory key-value store. You can set a key by sending a request to the HTTP bind address (which defaults to `localhost:11000`):
+`brokerd` uses an SQLite3 database for its key-value store. 
+
+You can set a key by sending a request to the HTTP bind address (which defaults to `localhost:11000`):
+
 ```bash
-curl -XPOST localhost:11000/key -d '{"foo": "bar"}'
+$> curl -XPOST localhost:11000/key -d '{"foo": "bar"}'
 ```
 
 You can read the value for a key like so:
 ```bash
-curl -XGET localhost:11000/key/foo
+$> curl -XGET localhost:11000/key/foo
 ```
 
-## Running hraftd
-*Building hraftd requires Go 1.13 or later. [gvm](https://github.com/moovweb/gvm) is a great tool for installing and managing your versions of Go.*
+## Running `brokerd`
 
-Starting and running a hraftd cluster is easy. Download hraftd like so:
+_brokerd uses embed.FS; therefore it requires Go 1.16 or later._
+
+Starting and running a `brokerd` cluster is easy. Download `brokerd` like so:
 ```bash
-mkdir hraftd
-cd hraftd/
+mkdir brokerd
+cd brokerd/
 export GOPATH=$PWD
-GO111MODULE=on go get github.com/otoolep/hraftd
+GO111MODULE=on go get github.com/dihedron/brokerd
 ```
 
-Run your first hraftd node like so:
-```bash
-$GOPATH/bin/hraftd -id node0 ~/node0
-```
+`brokerd` uses [`goreman`](https://github.com/mattn/goreman) to start a53-nodes cluster on the local machine. Once you have installed `goreman` on the local machine, open a terminal in the project root directory and start the `brokerd` cluster like this:
 
-You can now set a key and read its value back:
 ```bash
-curl -XPOST localhost:11000/key -d '{"user1": "batman"}'
-curl -XGET localhost:11000/key/user1
+$> goreman start
+```
+Once the cluster has started up (it takes about 5 seconds to start up) you can set a key and read its value back:
+
+```bash
+$> curl -XPOST localhost:11000/key -d '{"foo": "bar"}'
+$> curl -XGET localhost:11000/key/foo
 ```
 
 ### Bring up a cluster
