@@ -21,14 +21,24 @@ const (
 
 type generator func() string
 
-var rnd *rand.Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
-
-func random() string {
-	return fmt.Sprintf("%d", rand.Int())
+func random(seed int64) generator {
+	rnd := rand.New(rand.NewSource(seed))
+	return func() string {
+		return fmt.Sprintf("%d", rnd.Int())
+	}
 }
 
 func exactly(value string) generator {
 	return func() string {
+		return value
+	}
+}
+
+func sequence(start int) generator {
+	counter := start
+	return func() string {
+		value := fmt.Sprintf("%d", counter)
+		counter++
 		return value
 	}
 }
@@ -105,11 +115,13 @@ func set(id int, url string, key string, value generator, iter int, wg *sync.Wai
 func main() {
 	log.L.Sync()
 	var wg sync.WaitGroup
-	const iterations int = 500
+	const iterations int = 25
 
 	wg.Add(6)
+
 	// go set(0, "http://localhost:11000/key/", "foo", exactly("bar"), 10, &wg)
-	go set(0, "http://localhost:11000/key/", "foo", random, iterations, &wg)
+	go set(0, "http://localhost:11000/key/", "foo", sequence(0), iterations-10, &wg)
+	// go set(0, "http://localhost:11000/key/", "foo", random(time.Now().UnixNano()), 100*iterations, &wg)
 	go get(0, "http://localhost:11000/key/", "foo", iterations, &wg)
 	go get(1, "http://localhost:11001/key/", "foo", iterations, &wg)
 	go get(2, "http://localhost:11002/key/", "foo", iterations, &wg)
