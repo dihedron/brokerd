@@ -1,7 +1,0 @@
-# Use goreman to run `go get github.com/mattn/goreman`
-setup: mkdir -p _test/
-brokerd1: ./brokerd --id=node0 --http=127.0.0.1:11000 --raft=127.0.0.1:12000 --dir="_test/node0" 
-brokerd2: sleep 5 && ./brokerd --id=node1 --http=127.0.0.1:11001 --raft=127.0.0.1:12001 --join=127.0.0.1:11000 --dir="_test/node1" 
-brokerd3: sleep 5 && ./brokerd --id=node2 --http=127.0.0.1:11002 --raft=127.0.0.1:12002 --join=127.0.0.1:11000 --dir="_test/node2" 
-brokerd4: sleep 5 && ./brokerd --id=node3 --http=127.0.0.1:11003 --raft=127.0.0.1:12003 --join=127.0.0.1:11000 --dir="_test/node3" 
-brokerd5: sleep 5 && ./brokerd --id=node4 --http=127.0.0.1:11004 --raft=127.0.0.1:12004 --join=127.0.0.1:11000 --dir="_test/node4" 
