@@ -4,7 +4,8 @@ package proto;
 
 option go_package = "github.com/dihedron/brokerd/proto";
 
-import "google/protobuf/struct.proto";
+//import "google/protobuf/struct.proto";
+import "proto/commons.proto";
 
 // for a discussion on how to handle nullable fields and
 // optional values in complex objects, see the discussion at 
@@ -21,9 +22,3 @@ message Pair {
   NullableString value = 2;
 }
 
-message NullableString {
-  oneof kind {
-    google.protobuf.NullValue null = 1;
-    string data = 2;
-  }
-}

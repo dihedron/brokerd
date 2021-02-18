@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/dihedron/brokerd/proto";
+
+import "google/protobuf/empty.proto";
+import "google/api/annotations.proto";
+import "proto/commons.proto";
+
+// for a discussion on how to handle nullable fields and
+// optional values in complex objects, see the discussion at 
+// https://itnext.io/protobuf-and-null-support-1908a15311b6
+
+service Raft {
+    rpc GetLeader(google.protobuf.Empty) returns (ServerAddress) {
+        option (google.api.http) = {
+            post: "/v1/raft/leader"
+            //body: "*"
+        };  
+    } 
+    // rpc Join(Pair) returns (Pair) {}
+    // rpc Set(Pair) returns (Pair) {}
+    // rpc Remove(Pair) returns (Pair) {}
+}
+
+message ServerAddress {
+  NullableString value = 1;
+}
+
+// message NullableString {
+//   oneof kind {
+//     google.protobuf.NullValue null = 1;
+//     string data = 2;
+//   }
+// }
