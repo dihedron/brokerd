@@ -44,9 +44,10 @@ func main() {
 	log.L.Info("raft state directory", zap.String("path", options.RaftDir))
 	os.MkdirAll(options.RaftDir, 0o700)
 
-	s := store.New()
-	s.RaftDir = options.RaftDir
-	s.RaftBind = options.RaftAddress
+	s := store.New(
+		store.WithRaftDirectory(options.RaftDir),
+		store.WithRaftBindAddress(options.RaftAddress),
+	)
 	if err := s.Open(options.JoinAddress == "", options.NodeID); err != nil {
 		log.L.Error("failed to open store", zap.Error(err))
 	}

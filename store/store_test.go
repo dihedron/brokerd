@@ -9,12 +9,10 @@ import (
 
 // Test_StoreOpen tests that the store can be opened.
 func Test_StoreOpen(t *testing.T) {
-	s := New()
 	tmpDir, _ := ioutil.TempDir("", "store_test")
 	defer os.RemoveAll(tmpDir)
+	s := New(WithRaftBindAddress("127.0.0.1:0"), WithRaftDirectory(tmpDir))
 
-	s.RaftBind = "127.0.0.1:0"
-	s.RaftDir = tmpDir
 	if s == nil {
 		t.Fatalf("failed to create store")
 	}
@@ -26,12 +24,10 @@ func Test_StoreOpen(t *testing.T) {
 
 // Test_StoreOpenSingleNode tests that a command can be applied to the log
 func Test_StoreOpenSingleNode(t *testing.T) {
-	s := New()
 	tmpDir, _ := ioutil.TempDir("", "store_test")
 	defer os.RemoveAll(tmpDir)
+	s := New(WithRaftBindAddress("127.0.0.1:0"), WithRaftDirectory(tmpDir))
 
-	s.RaftBind = "127.0.0.1:0"
-	s.RaftDir = tmpDir
 	if s == nil {
 		t.Fatalf("failed to create store")
 	}
@@ -75,12 +71,11 @@ func Test_StoreOpenSingleNode(t *testing.T) {
 // Test_StoreInMemOpenSingleNode tests that a command can be applied to the log
 // stored in RAM.
 func Test_StoreInMemOpenSingleNode(t *testing.T) {
-	s := New()
 	tmpDir, _ := ioutil.TempDir("", "store_test")
 	defer os.RemoveAll(tmpDir)
 
-	s.RaftBind = "127.0.0.1:0"
-	s.RaftDir = tmpDir
+	s := New(WithRaftDirectory(tmpDir), WithRaftBindAddress("127.0.0.1:0"))
+
 	if s == nil {
 		t.Fatalf("failed to create store")
 	}

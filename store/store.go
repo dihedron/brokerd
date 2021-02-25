@@ -28,14 +28,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// DefaultRetainSnapshotCount is the default number of snaphots
-	// to keep.
-	DefaultRetainSnapshotCount = 2
-	// DefaultRaftTimeout is the default timeout of the Raft cluster.
-	DefaultRaftTimeout = 10 * time.Second
-)
-
 type command struct {
 	Op    string `json:"op,omitempty"`
 	Key   string `json:"key,omitempty"`
@@ -44,23 +36,19 @@ type command struct {
 
 // Store is a simple key-value store, where all changes are made via Raft consensus.
 type Store struct {
-	// RaftDir is the directory where the Raft protocol files
-	// will be kept.
-	RaftDir string
-	// RaftBind is the ...
-	RaftBind string
 	// db is the database for the FSM.
 	db *sql.DB
 	// raft is the Raft consensus mechanism.
 	raft *raft.Raft
-
-	// mu sync.Mutex
-	// m  map[string]string // The key-value store for the system.
+	// options are the cluster options.
+	options *Options
 }
 
 // New returns a new Store.
-func New() *Store {
-	return &Store{}
+func New(options ...Option) *Store {
+	return &Store{
+		options: loadOptions(options...),
+	}
 }
 
 // Open opens the store. If enableSingle is set, and there are no existing peers,
@@ -68,7 +56,7 @@ func New() *Store {
 // localID should be the server identifier for this node.
 func (s *Store) Open(enableSingle bool, localID string) error {
 	// open the local database
-	db, err := sqlite.InitDB(filepath.Join(s.RaftDir, "sqlite3.db"), migrations.Migrations)
+	db, err := sqlite.InitDB(filepath.Join(s.options.RaftDirectory, "sqlite3.db"), migrations.Migrations)
 	if err != nil {
 		log.L.Error("error opening database", zap.Error(err))
 		return err
@@ -86,25 +74,28 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 	config.LocalID = raft.ServerID(localID)
 
 	// setup Raft communication
-	addr, err := net.ResolveTCPAddr("tcp", s.RaftBind)
+	advertise, err := net.ResolveTCPAddr("tcp", s.options.RaftBindAddress)
 	if err != nil {
+		log.L.Error("error resolving bind address", zap.String("bind address", s.options.RaftBindAddress), zap.Error(err))
 		return err
 	}
-	transport, err := raft.NewTCPTransport(s.RaftBind, addr, 3, 10*time.Second, os.Stderr)
+	transport, err := raft.NewTCPTransport(s.options.RaftBindAddress, advertise, 3, 10*time.Second, os.Stderr)
 	if err != nil {
+		log.L.Error("error creating Raft TCP transport", zap.String("bind address", s.options.RaftBindAddress), zap.Error(err))
 		return err
 	}
 
 	// create the snapshot store; this allows the Raft to truncate the log
-	snapshots, err := raft.NewFileSnapshotStore(s.RaftDir, DefaultRetainSnapshotCount, os.Stderr)
+	snapshots, err := raft.NewFileSnapshotStore(s.options.RaftDirectory, DefaultRetainSnapshotCount, os.Stderr)
 	if err != nil {
+		log.L.Error("error creating file snaphost store", zap.String("directory", s.options.RaftDirectory), zap.Error(err))
 		return fmt.Errorf("file snapshot store: %s", err)
 	}
 
 	// create the log store and stable store
 	var logStore raft.LogStore
 	var stableStore raft.StableStore
-	boltDB, err := raftboltdb.NewBoltStore(filepath.Join(s.RaftDir, "raft.db"))
+	boltDB, err := raftboltdb.NewBoltStore(filepath.Join(s.options.RaftDirectory, "raft.db"))
 	if err != nil {
 		return fmt.Errorf("new bolt store: %s", err)
 	}
@@ -129,7 +120,6 @@ func (s *Store) Open(enableSingle bool, localID string) error {
 		}
 		ra.BootstrapCluster(configuration)
 	}
-
 	return nil
 }
 
@@ -153,9 +143,6 @@ func (s *Store) Get(key string) (string, error) {
 	tx.Commit()
 	log.L.Debug("returning value", zap.String("key", key), zap.String("value", value))
 	return value, nil
-	// s.mu.Lock()
-	// defer s.mu.Unlock()
-	// return s.m[key], nil
 }
 
 // Set sets the value for the given key.
@@ -195,6 +182,11 @@ func (s *Store) Delete(key string) error {
 
 	f := s.raft.Apply(b, DefaultRaftTimeout)
 	return f.Error()
+}
+
+func (s *Store) Snapshot() error {
+	future := s.raft.Snapshot()
+	return future.Error()
 }
 
 // Join joins a node, identified by nodeID and located at addr, to this store.
@@ -284,7 +276,6 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 
 // Restore stores the key-value store to a previous state.
 func (f *fsm) Restore(rc io.ReadCloser) error {
-	// o := make(map[string]string)
 	f.db.Begin()
 	pairs := []pair{}
 	if err := json.NewDecoder(rc).Decode(&pairs); err != nil {

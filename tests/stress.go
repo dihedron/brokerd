@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	// WAIT is the tim to wait between iterations.
-	WAIT time.Duration = 50 * time.Millisecond
+	// WAIT is the time to wait between iterations.
+	WAIT time.Duration = 5 * time.Millisecond
 )
 
 type generator func() string
@@ -115,7 +115,7 @@ func set(id int, url string, key string, value generator, iter int, wg *sync.Wai
 func main() {
 	log.L.Sync()
 	var wg sync.WaitGroup
-	const iterations int = 25
+	const iterations int = 250
 
 	wg.Add(6)
 
