@@ -30,10 +30,11 @@ type Cluster struct {
 	// nodeID is the unique ID of the server in the cluster.
 	nodeID string
 	// raft is the underlying Raft consensus cluster.
-	raft *raft.Raft
+	Raft *raft.Raft
 	// transport is the underlying transport layer for Raft.
-	transport *raft.NetworkTransport
+	Transport *raft.NetworkTransport
 	// // snaphost is the underlying snapshot store
+	Snapshots *raft.FileSnapshotStore
 }
 
 // New creates a new Cluster and associates it with the given finite
@@ -62,7 +63,7 @@ func New(nodeID string, fsm raft.FSM, options ...Option) (*Cluster, error) {
 		log.L.Error("error creating Raft TCP transport", zap.String("bind address", c.RaftBindAddress), zap.Error(err))
 		return nil, err
 	}
-	c.transport = transport
+	c.Transport = transport
 
 	// create the snapshot store; this allows the Raft to truncate the log
 	snapshots, err := raft.NewFileSnapshotStore(c.RaftDirectory, DefaultRetainSnapshotCount, os.Stderr)
@@ -70,6 +71,7 @@ func New(nodeID string, fsm raft.FSM, options ...Option) (*Cluster, error) {
 		log.L.Error("error creating file snaphost store", zap.String("directory", c.RaftDirectory), zap.Error(err))
 		return nil, fmt.Errorf("file snapshot store: %s", err)
 	}
+	c.Snapshots = snapshots
 
 	// create the underlying BoltDB store, used as both log store and stable store
 	// var logStore raft.LogStore
@@ -85,13 +87,8 @@ func New(nodeID string, fsm raft.FSM, options ...Option) (*Cluster, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new raft: %s", err)
 	}
-	c.raft = r
+	c.Raft = r
 	return c, nil
-}
-
-// Raft returns the underlying Raft implementation.
-func (c *Cluster) Raft() *raft.Raft {
-	return c.raft
 }
 
 // Node represents a node in the Cluster.
@@ -109,7 +106,7 @@ func (c *Cluster) Bootstrap(nodes ...Node) error {
 	if len(nodes) == 0 {
 		configuration.Servers = append(configuration.Servers, raft.Server{
 			ID:      raft.ServerID(c.nodeID),
-			Address: c.transport.LocalAddr(),
+			Address: c.Transport.LocalAddr(),
 		})
 	} else {
 		for _, node := range nodes {
@@ -120,7 +117,7 @@ func (c *Cluster) Bootstrap(nodes ...Node) error {
 		}
 	}
 
-	if f := c.raft.BootstrapCluster(configuration); f.Error() != nil {
+	if f := c.Raft.BootstrapCluster(configuration); f.Error() != nil {
 		log.L.Error("error bootstrapping cluster", zap.Error(f.Error()))
 		return f.Error()
 	}
@@ -134,7 +131,7 @@ func (c *Cluster) Bootstrap(nodes ...Node) error {
 func (c *Cluster) Join(nodeID string, address string) error {
 	log.L.Info("received join request for remote node", zap.String("nodeID", nodeID), zap.String("address", address))
 
-	configFuture := c.raft.GetConfiguration()
+	configFuture := c.Raft.GetConfiguration()
 	if err := configFuture.Error(); err != nil {
 		log.L.Error("failed to get raft configuration", zap.Error(err))
 		return err
@@ -151,14 +148,14 @@ func (c *Cluster) Join(nodeID string, address string) error {
 				return nil
 			}
 
-			future := c.raft.RemoveServer(srv.ID, 0, 0)
+			future := c.Raft.RemoveServer(srv.ID, 0, 0)
 			if err := future.Error(); err != nil {
 				return fmt.Errorf("error removing existing node %s at %s: %s", nodeID, address, err)
 			}
 		}
 	}
 
-	if f := c.raft.AddVoter(raft.ServerID(nodeID), raft.ServerAddress(address), 0, 0); f.Error() != nil {
+	if f := c.Raft.AddVoter(raft.ServerID(nodeID), raft.ServerAddress(address), 0, 0); f.Error() != nil {
 		log.L.Error("error adding voter to cluster", zap.Error(f.Error()), zap.String("node ID", nodeID), zap.String("address", address))
 		return f.Error()
 	}
