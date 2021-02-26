@@ -16,7 +16,7 @@ import (
 
 const (
 	// WAIT is the time to wait between iterations.
-	WAIT time.Duration = 5 * time.Millisecond
+	WAIT time.Duration = 50 * time.Millisecond
 )
 
 type generator func() string
@@ -52,6 +52,7 @@ func get(id int, url string, key string, iter int, wg *sync.WaitGroup) error {
 			var response *http.Response
 			var err error
 			var body []byte
+			// timeout a 0.2, 0.3 secondi
 			if response, err = http.Get(url + key); err != nil {
 				return err
 			}
@@ -120,13 +121,13 @@ func main() {
 	wg.Add(6)
 
 	// go set(0, "http://localhost:11000/key/", "foo", exactly("bar"), 10, &wg)
-	go set(0, "http://localhost:11000/key/", "foo", sequence(0), iterations-10, &wg)
 	// go set(0, "http://localhost:11000/key/", "foo", random(time.Now().UnixNano()), 100*iterations, &wg)
 	go get(0, "http://localhost:11000/key/", "foo", iterations, &wg)
 	go get(1, "http://localhost:11001/key/", "foo", iterations, &wg)
 	go get(2, "http://localhost:11002/key/", "foo", iterations, &wg)
 	go get(3, "http://localhost:11003/key/", "foo", iterations, &wg)
 	go get(4, "http://localhost:11004/key/", "foo", iterations, &wg)
+	go set(0, "http://localhost:11000/key/", "foo", sequence(0), iterations-10, &wg)
 
 	wg.Wait()
 }

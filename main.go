@@ -44,6 +44,12 @@ func main() {
 	log.L.Info("raft state directory", zap.String("path", options.RaftDir))
 	os.MkdirAll(options.RaftDir, 0o700)
 
+	// r := cluster.New(
+
+	// 	cluster.WithRaftDirectory(options.RaftDir),
+	// 	cluster.WithRaftBindAddress(options.RaftAddress),
+	// )
+
 	s := store.New(
 		store.WithRaftDirectory(options.RaftDir),
 		store.WithRaftBindAddress(options.RaftAddress),
