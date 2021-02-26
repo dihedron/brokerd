@@ -27,27 +27,27 @@ type Cluster struct {
 	RaftRetainSnapshotCount int
 	// RaftTimeout is the timeout of the Raft cluster.
 	RaftTimeout time.Duration
-	// nodeID is the unique ID of the server in the cluster.
-	nodeID string
-	// raft is the underlying Raft consensus cluster.
+	// NodeID is the unique ID of the server in the cluster.
+	NodeID string
+	// Raft is the underlying Raft consensus cluster.
 	Raft *raft.Raft
-	// transport is the underlying transport layer for Raft.
+	// Transport is the underlying transport layer for Raft.
 	Transport *raft.NetworkTransport
-	// // snaphost is the underlying snapshot store
+	// Snapshots is the underlying snapshots store.
 	Snapshots *raft.FileSnapshotStore
 }
 
 // New creates a new Cluster and associates it with the given finite
 // state machine (FSM), with the given cluster options.
 func New(nodeID string, fsm raft.FSM, options ...Option) (*Cluster, error) {
-
+	// setup with defaults
 	c := &Cluster{
-		nodeID:                  nodeID,
+		NodeID:                  nodeID,
 		RaftDirectory:           "raft",
 		RaftBindAddress:         "127.0.0.1:12000",
 		RaftRetainSnapshotCount: DefaultRetainSnapshotCount,
 	}
-	// apply functional options
+	// apply functional options to override
 	for _, option := range options {
 		option(c)
 	}
@@ -105,7 +105,7 @@ func (c *Cluster) Bootstrap(nodes ...Node) error {
 	}
 	if len(nodes) == 0 {
 		configuration.Servers = append(configuration.Servers, raft.Server{
-			ID:      raft.ServerID(c.nodeID),
+			ID:      raft.ServerID(c.NodeID),
 			Address: c.Transport.LocalAddr(),
 		})
 	} else {
@@ -121,7 +121,7 @@ func (c *Cluster) Bootstrap(nodes ...Node) error {
 		log.L.Error("error bootstrapping cluster", zap.Error(f.Error()))
 		return f.Error()
 	}
-	log.L.Info("cluster bootstrapped successfully", zap.String("master node ID", c.nodeID))
+	log.L.Info("cluster bootstrapped successfully", zap.String("master node ID", c.NodeID))
 	return nil
 }
 
