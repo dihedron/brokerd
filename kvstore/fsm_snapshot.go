@@ -1,4 +1,4 @@
-package store2
+package kvstore
 
 import (
 	"database/sql"
@@ -9,13 +9,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// SQLiteSnapshot is a transient object, capable of generating
+// SQLiteFSMSnapshot is a transient object, capable of generating
 // a snaphot of the SQLite DB contents at the moment it was created.
-type SQLiteSnapshot struct {
+type SQLiteFSMSnapshot struct {
 	db   *sql.DB
 	tx   *sql.Tx
 	rows *sql.Rows
-	// store map[string]string
 }
 
 type pair struct {
@@ -23,9 +22,9 @@ type pair struct {
 	Value string `json:"value"`
 }
 
-// Persist writes the SQLiteSnapshot contents to the Raft-provided
+// Persist writes the SQLiteFSMSnapshot contents to the Raft-provided
 // sink.
-func (s *SQLiteSnapshot) Persist(sink raft.SnapshotSink) error {
+func (s *SQLiteFSMSnapshot) Persist(sink raft.SnapshotSink) error {
 	log.L.Debug("persisting snapshot...")
 
 	// run the transaction inside a nested function, so
@@ -75,12 +74,11 @@ func (s *SQLiteSnapshot) Persist(sink raft.SnapshotSink) error {
 		s.tx.Rollback()
 		sink.Cancel()
 	}
-
 	return err
 }
 
 // Release is called when a snapshot can be dismissed,
 // so any resources and locks can be removed.
-func (s *SQLiteSnapshot) Release() {
+func (s *SQLiteFSMSnapshot) Release() {
 	log.L.Debug("releasing snapshot")
 }

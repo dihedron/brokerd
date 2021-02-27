@@ -8,9 +8,10 @@ import (
 	"os"
 	"os/signal"
 
-	httpd "github.com/dihedron/brokerd/http"
+	"github.com/dihedron/brokerd/cluster"
+	"github.com/dihedron/brokerd/kvstore"
 	"github.com/dihedron/brokerd/log"
-	"github.com/dihedron/brokerd/store"
+	"github.com/dihedron/brokerd/sqlite"
 	"github.com/jessevdk/go-flags"
 	"go.uber.org/zap"
 )
@@ -44,32 +45,52 @@ func main() {
 	log.L.Info("raft state directory", zap.String("path", options.RaftDir))
 	os.MkdirAll(options.RaftDir, 0o700)
 
-	// r := cluster.New(
+	store, err := kvstore.NewLocalStore(sqlite.WithStoreDirectory(options.RaftDir))
+	if err != nil {
+		log.L.Error("error ")
+	}
 
+	fsm := kvstore.NewReplicatedStoreFSM(store)
+	cluster, err := cluster.New(
+		options.NodeID,
+		fsm,
+		cluster.WithRaftBindAddress(options.RaftAddress),
+		cluster.WithRaftDirectory(options.RaftDir),
+		// TODO: check for more options
+	)
+	if options.JoinAddress == "" {
+		cluster.Bootstrap()
+	} else {
+		cluster.Join(options.NodeID, options.JoinAddress)
+	}
+	kvstore.NewReplicatedStore(true, store, cluster)
+
+	// r := cluster.New(
+	// 	options.NodeID, , options ...Option
 	// 	cluster.WithRaftDirectory(options.RaftDir),
 	// 	cluster.WithRaftBindAddress(options.RaftAddress),
 	// )
 
-	s := store.New(
-		store.WithRaftDirectory(options.RaftDir),
-		store.WithRaftBindAddress(options.RaftAddress),
-	)
-	if err := s.Open(options.JoinAddress == "", options.NodeID); err != nil {
-		log.L.Error("failed to open store", zap.Error(err))
-	}
+	// s := store.New(
+	// 	store.WithRaftDirectory(options.RaftDir),
+	// 	store.WithRaftBindAddress(options.RaftAddress),
+	// )
+	// if err := s.Open(options.JoinAddress == "", options.NodeID); err != nil {
+	// 	log.L.Error("failed to open store", zap.Error(err))
+	// }
 
-	h := httpd.New(options.HTTPAddress, s)
-	if err := h.Start(); err != nil {
-		log.L.Error("failed to start HTTP service", zap.Error(err))
-		os.Exit(1)
-	}
+	// h := httpd.New(options.HTTPAddress, s)
+	// if err := h.Start(); err != nil {
+	// 	log.L.Error("failed to start HTTP service", zap.Error(err))
+	// 	os.Exit(1)
+	// }
 
-	// If join was specified, make the join request.
-	if options.JoinAddress != "" {
-		if err := join(options.JoinAddress, options.RaftAddress, options.NodeID); err != nil {
-			log.L.Error("failed to join node", zap.String("join address", options.JoinAddress), zap.Error(err))
-		}
-	}
+	// // If join was specified, make the join request.
+	// if options.JoinAddress != "" {
+	// 	if err := join(options.JoinAddress, options.RaftAddress, options.NodeID); err != nil {
+	// 		log.L.Error("failed to join node", zap.String("join address", options.JoinAddress), zap.Error(err))
+	// 	}
+	// }
 
 	log.L.Info("application started successfully")
 

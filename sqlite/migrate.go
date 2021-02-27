@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"sort"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite3 drivers
@@ -13,54 +11,6 @@ import (
 	"github.com/dihedron/brokerd/log"
 	"go.uber.org/zap"
 )
-
-// InitDB opens and initalises an SQLite3 DB with all
-// correct settings.
-func InitDB(dsn string, migrations fs.FS) (db *sql.DB, err error) {
-	// ensure a DSN is set before attempting to open the database
-	if dsn == "" {
-		log.L.Error("the database DSN must be specified")
-		err = fmt.Errorf("dsn required")
-		return
-	}
-	log.L.Debug("opening SQLite3 database", zap.String("DSN", dsn))
-	// make the parent directory unless using an in-memory db
-	if dsn != ":memory:" {
-		if err = os.MkdirAll(filepath.Dir(dsn), 0700); err != nil {
-			log.L.Error("error creating directory for on-disk DB file", zap.String("path", dsn), zap.Error(err))
-			return
-		}
-	}
-	// open the database
-	if db, err = sql.Open("sqlite3", dsn); err != nil {
-		log.L.Error("error connecting to the database", zap.Error(err))
-		return
-	}
-	// enable WAL; SQLite performs better with the WAL because it allows
-	// multiple readers to operate while data is being written
-	if _, err = db.Exec(`PRAGMA journal_mode = wal;`); err != nil {
-		log.L.Error("error enabling WAL", zap.Error(err))
-		err = fmt.Errorf("enable wal: %w", err)
-		return
-	}
-	// enable foreign key checks: for historical reasons, SQLite does not check
-	// foreign key constraints by default... which is kinda insane; there's some
-	// overhead on inserts to verify foreign key integrity but it's definitely
-	// worth it.
-	if _, err = db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
-		log.L.Error("error enabling foreign keys checks", zap.Error(err))
-		err = fmt.Errorf("foreign keys pragma: %w", err)
-		return
-	}
-
-	// apply migrations (if any)
-	if err = migrate(db, migrations); err != nil {
-		log.L.Error("error applying migrations", zap.Error(err))
-		err = fmt.Errorf("migrate: %w", err)
-		return
-	}
-	return
-}
 
 // migrate sets up migration tracking and executes pending migration files.
 //
@@ -75,8 +25,9 @@ func migrate(db *sql.DB, migrations fs.FS) error {
 
 	// ensure the 'migrations' table exists so we don't duplicate migrations.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);`); err != nil {
+		err = fmt.Errorf("cannot create migrations table: %w", err)
 		log.L.Error("error creating migrations table", zap.Error(err))
-		return fmt.Errorf("cannot create migrations table: %w", err)
+		return err
 	}
 
 	// read migration files from our embedded file system;
@@ -91,8 +42,9 @@ func migrate(db *sql.DB, migrations fs.FS) error {
 	// loop over all migration files and execute them in order
 	for _, name := range names {
 		if err := migrateFile(db, migrations, name); err != nil {
+			err = fmt.Errorf("migration error: name=%q err=%w", name, err)
 			log.L.Error("error applying migration file", zap.String("name", name), zap.Error(err))
-			return fmt.Errorf("migration error: name=%q err=%w", name, err)
+			return err
 		}
 	}
 	log.L.Debug("all migrations applied")

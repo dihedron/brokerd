@@ -1,4 +1,4 @@
-package store4
+package kvstore
 
 import (
 	"context"
@@ -12,30 +12,50 @@ import (
 	"go.uber.org/zap"
 )
 
-//SQLiteFSM is an SQLite-base Raft Finite State Machine.
-type SQLiteFSM struct {
-	store *SQLiteStore
+// CommandType represents the type of command.
+type CommandType int8
+
+const (
+	// Get is the "Get" command type.
+	Get CommandType = iota
+	// Set is the "Set" command type.
+	Set
+	// Delete is the "Delete" command type.
+	Delete
+)
+
+// Command is the Finite State Machine command.
+type Command struct {
+	Type  CommandType `json:"type"`
+	Key   string      `json:"key"`
+	Value string      `json:"value,omitempty"`
+}
+
+// ReplicatedStoreFSM is an SQLite-base Raft Finite State Machine.
+type ReplicatedStoreFSM struct {
+	store *LocalStore
+}
+
+func NewReplicatedStoreFSM(store *LocalStore) *ReplicatedStoreFSM {
+	return &ReplicatedStoreFSM{
+		store: store,
+	}
 }
 
 // Apply log is invoked once a log entry is committed.
 // It returns a value which will be made available in the
 // ApplyFuture returned by Raft.Apply method if that
 // method was called on the same Raft node as the FSM.
-func (s *SQLiteFSM) Apply(l *raft.Log) interface{} {
+func (s *ReplicatedStoreFSM) Apply(l *raft.Log) interface{} {
 	var command Command
 	if err := json.Unmarshal(l.Data, &command); err != nil {
 		log.L.Error("failed to marshal command", zap.Error(err))
 		return err
 	}
+	// NOTE: Get does not MUTATE the FSM, thus it needs not
+	// go though the FSM.Apply rigmarole; it can be served directly
+	// from the local store; this is handled in the RemoteStore.
 	switch command.Type {
-	case Get:
-		value, err := s.store.Get(command.Key)
-		if err != nil {
-			log.L.Error("error retrieving value from SQLite store", zap.String("key", command.Key), zap.Error(err))
-			return err
-		}
-		log.L.Debug("value retrieved", zap.String("key", command.Key), zap.String("value", value))
-		return value
 	case Set:
 		err := s.store.Set(command.Key, command.Value)
 		if err != nil {
@@ -60,12 +80,12 @@ func (s *SQLiteFSM) Apply(l *raft.Log) interface{} {
 }
 
 // Snapshot returns a snapshot of the key-value store, to support
-// log compaction; the returns SQLiteFSM
-func (s *SQLiteFSM) Snapshot() (raft.FSMSnapshot, error) {
+// log compaction; the returned ReplicatedStoreFSM...
+func (s *ReplicatedStoreFSM) Snapshot() (raft.FSMSnapshot, error) {
 	// SQLite3 has a SERIALIZABLE isolation level by default;
 	// in order to allow concurrent Apply() to proceed we declare
 	// this transaction as ReadOnly.
-	tx, err := s.store.db.BeginTx(context.Background(), &sql.TxOptions{
+	tx, err := s.store.DB.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelDefault,
 		ReadOnly:  true,
 	})
@@ -82,21 +102,21 @@ func (s *SQLiteFSM) Snapshot() (raft.FSMSnapshot, error) {
 	}
 
 	return &SQLiteFSMSnapshot{
-		db:   s.store.db,
+		db:   s.store.DB,
 		tx:   tx,
 		rows: rows,
 	}, nil
 }
 
 // Restore restores the FSM to a previous state from a snapshot.
-func (s *SQLiteFSM) Restore(data io.ReadCloser) error {
-	s.store.db.Begin()
+func (s *ReplicatedStoreFSM) Restore(data io.ReadCloser) error {
+	s.store.DB.Begin()
 	pairs := []pair{}
 	if err := json.NewDecoder(data).Decode(&pairs); err != nil {
 		log.L.Error("error unmarshaling JSON to snapshot contents", zap.Error(err))
 		return err
 	}
-	tx, err := s.store.db.BeginTx(context.Background(), &sql.TxOptions{
+	tx, err := s.store.DB.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelDefault,
 		ReadOnly:  false,
 	})

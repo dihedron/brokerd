@@ -1,50 +1,36 @@
-package store2
+package kvstore
 
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 
 	"github.com/dihedron/brokerd/log"
-	"github.com/dihedron/brokerd/migrations"
 	"github.com/dihedron/brokerd/sqlite"
 	"go.uber.org/zap"
 )
 
-// SQLiteStore is a store based on a local SQLite database.
-type SQLiteStore struct {
-	// db is the database for the FSM.
-	db *sql.DB
+// LocalStore is the non-replicated, local-only SQLite-based implementation
+// of the KVStore interface.
+type LocalStore struct {
+	sqlite.Store
 }
 
-// SQLiteStoreOptions contains all configuration parameters for
-// the SQLiteStore.
-type SQLiteStoreOptions struct {
-	StoreDirectory string
-}
-
-// NewSQLiteStore creates and initialises a new SQLite-based store.
-func NewSQLiteStore(options *SQLiteStoreOptions) (*SQLiteStore, error) {
-	store := &SQLiteStore{}
-	// open the local database
-	db, err := sqlite.InitDB(filepath.Join(options.StoreDirectory, "sqlite3.db"), migrations.Migrations)
+// NewLocalStore creates a new SQLite-based, non-replicated implementation
+// of the KVSTore interface.
+func NewLocalStore(options ...sqlite.Option) (*LocalStore, error) {
+	store, err := sqlite.New(options...)
 	if err != nil {
-		log.L.Error("error opening database", zap.Error(err))
+		log.L.Error("error allocating base SQLite store", zap.Error(err))
 		return nil, err
 	}
-	// test the connection
-	if err = db.Ping(); err != nil {
-		log.L.Error("cannot ping database", zap.Error(err))
-		return nil, err
-	}
-	store.db = db
-	log.L.Debug("database loaded")
-	return store, nil
+	return &LocalStore{
+		*store,
+	}, nil
 }
 
 // Get returns the value for the given key.
-func (s *SQLiteStore) Get(key string) (string, error) {
-	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{
+func (s *LocalStore) Get(key string) (string, error) {
+	tx, err := s.DB.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelDefault,
 		ReadOnly:  true,
 	})
@@ -66,8 +52,8 @@ func (s *SQLiteStore) Get(key string) (string, error) {
 
 // Set sets a value under the given key; if existing, it is updated,
 // otherwise a new key/value pair is created.
-func (s *SQLiteStore) Set(key string, value string) error {
-	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{
+func (s *LocalStore) Set(key string, value string) error {
+	tx, err := s.DB.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelDefault,
 		ReadOnly:  false,
 	})
@@ -75,7 +61,7 @@ func (s *SQLiteStore) Set(key string, value string) error {
 		log.L.Error("error opening transaction", zap.Error(err))
 		return err
 	}
-	_, err = s.db.Exec("INSERT OR REPLACE INTO pairs (key,value) VALUES (?,?)", key, value)
+	_, err = s.DB.Exec("INSERT OR REPLACE INTO pairs (key,value) VALUES (?,?)", key, value)
 	if err != nil {
 		log.L.Error("error inserting value into database", zap.String("key", key), zap.String("value", value), zap.Error(err))
 		return err
@@ -86,8 +72,8 @@ func (s *SQLiteStore) Set(key string, value string) error {
 }
 
 // Delete removes the key/value pair from the store.
-func (s *SQLiteStore) Delete(key string) error {
-	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{
+func (s *LocalStore) Delete(key string) error {
+	tx, err := s.DB.BeginTx(context.Background(), &sql.TxOptions{
 		Isolation: sql.LevelDefault,
 		ReadOnly:  false,
 	})
@@ -95,7 +81,7 @@ func (s *SQLiteStore) Delete(key string) error {
 		log.L.Error("error opening transaction", zap.Error(err))
 		return err
 	}
-	_, err = s.db.Exec("DELETE FROM pairs where key=?", key)
+	_, err = s.DB.Exec("DELETE FROM pairs where key=?", key)
 	if err != nil {
 		log.L.Error("error deleting pair", zap.String("key", key), zap.Error(err))
 		return err

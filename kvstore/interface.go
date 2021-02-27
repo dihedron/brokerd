@@ -1,7 +1,7 @@
-package store3
+package kvstore
 
-// Store is the common interface to all state stores.
-type Store interface {
+// KVStore is the common interface to all key/value stores.
+type KVStore interface {
 	// Get retrieves a value from the store, given its key.
 	Get(key string) (string, error)
 	// Set sets a value into the store, creating it if non existing.
