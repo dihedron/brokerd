@@ -11,6 +11,7 @@ import (
 	"github.com/dihedron/brokerd/log"
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
+	"github.com/hashicorp/raft"
 	"go.uber.org/zap"
 )
 
@@ -41,23 +42,38 @@ func New(address string, store kvstore.KVStore, cluster *cluster.Cluster) (*Serv
 	// Add the routes that do not need instrumentation
 	api := router.Group("/api/v1/")
 	{
-		api.GET("/value/:key", func(c *gin.Context) {
+		fleet := api.Group("/fleet")
+		{
+			fleet.GET("/fleet/self/state", func(c *gin.Context) {
+				var s raft.RaftState
+				state := cluster.Raft.State()
+				c.JSON(http.StatusOK, gin.H{
+					state: state,
+				})
+			})
+
+			fleet.GET("/fleet/nodes", func(c *gin.Context) {
+				// state := cluster.Raft.State()
+				// state.
+			})
+		}
+
+		api.GET("/configuration/:key", func(c *gin.Context) {
 			key := c.Param("key")
 			value, err := store.Get(key)
-			if err != nil  {
-				log.L.Error("error retrieving value from store", zap.Key("key", key), zap.Error(err))
-				c.JSON(http.StatusNotFound, gin.H({
-					code: "not found",
+			if err != nil {
+				log.L.Error("error retrieving value from store", zap.String("key", key), zap.Error(err))
+				c.JSON(http.StatusNotFound, gin.H{
+					code:    "not found",
 					message: "item not found",
-				}))
+				})
 				return
 			}
-			c.JSON(http.StatusOK,  gin.H({
-				key: key,
+			c.JSON(http.StatusOK, gin.H{
+				key:   key,
 				value: value,
-			}))
+			})
 		})
-
 	}
 
 	// TODO: add more routes here....

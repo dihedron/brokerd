@@ -62,7 +62,7 @@ func main() {
 	// leaderCh := cluster.Raft.LeaderCh()
 	// rabbitCh:
 	// httdCh:
-	// signalCh 
+	// signalCh
 
 	// for {
 	// 	if leader {
@@ -71,19 +71,19 @@ func main() {
 	// 				// son diventato leader
 	// 			<-rabbitCh:
 	// 			<-httdCh:
-	// 			<-signalCh 
+	// 			<-signalCh
 	// 			<-timeoutCh
 
 	// 	} else {
 	// 		<-leaderCh:
 	// 		httdCh:
-	// 		signalCh 		
+	// 		signalCh
 
 	// 	}
-	
+
 	// }
 
-}
+	// }
 
 	if options.JoinAddress == "" {
 		cluster.Bootstrap()
@@ -91,7 +91,7 @@ func main() {
 		// join can only be performed on the leader, NEVER on the follower!
 		// so perform a cURL to the leader and ask it to be admitted.
 		// API REST
-		// POST https://<indirizzo del leader>/api/v1/join?me:192.  -> redirect al leader		
+		// POST https://<indirizzo del leader>/api/v1/join?me:192.  -> redirect al leader
 	}
 	rstore := kvstore.NewReplicatedStore(true, lstore, cluster)
 
