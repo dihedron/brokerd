@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dihedron/brokerd/cluster"
+	"github.com/dihedron/brokerd/kvstore"
 	"github.com/dihedron/brokerd/log"
 	"go.uber.org/zap"
 )
@@ -30,17 +32,18 @@ type Store interface {
 
 // Service provides HTTP service.
 type Service struct {
-	addr string
-	ln   net.Listener
-
-	store Store
+	addr    string
+	ln      net.Listener
+	store   kvstore.KVStore
+	cluster *cluster.Cluster
 }
 
 // New returns an uninitialized HTTP service.
-func New(addr string, store Store) *Service {
+func New(addr string, store kvstore.KVStore, cluster *cluster.Cluster) *Service {
 	return &Service{
-		addr:  addr,
-		store: store,
+		addr:    addr,
+		store:   store,
+		cluster: cluster,
 	}
 }
 
@@ -109,7 +112,7 @@ func (s *Service) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.Join(nodeID, remoteAddr); err != nil {
+	if err := s.cluster.Join(nodeID, remoteAddr); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

@@ -9,6 +9,7 @@ import (
 	"os/signal"
 
 	"github.com/dihedron/brokerd/cluster"
+	"github.com/dihedron/brokerd/httpd"
 	"github.com/dihedron/brokerd/kvstore"
 	"github.com/dihedron/brokerd/log"
 	"github.com/dihedron/brokerd/sqlite"
@@ -45,12 +46,12 @@ func main() {
 	log.L.Info("raft state directory", zap.String("path", options.RaftDir))
 	os.MkdirAll(options.RaftDir, 0o700)
 
-	store, err := kvstore.NewLocalStore(sqlite.WithStoreDirectory(options.RaftDir))
+	lstore, err := kvstore.NewLocalStore(sqlite.WithStoreDirectory(options.RaftDir))
 	if err != nil {
 		log.L.Error("error ")
 	}
 
-	fsm := kvstore.NewReplicatedStoreFSM(store)
+	fsm := kvstore.NewReplicatedStoreFSM(lstore)
 	cluster, err := cluster.New(
 		options.NodeID,
 		fsm,
@@ -60,10 +61,13 @@ func main() {
 	)
 	if options.JoinAddress == "" {
 		cluster.Bootstrap()
+		// } else {
+		// 	cluster.Join(options.NodeID, options.JoinAddress)
 	} else {
-		cluster.Join(options.NodeID, options.JoinAddress)
+		// join can only be performed on the leader, NEVER on the follower!
+		// so perform a cURL to the leader and ask it to be admitted.
 	}
-	kvstore.NewReplicatedStore(true, store, cluster)
+	rstore := kvstore.NewReplicatedStore(true, lstore, cluster)
 
 	// r := cluster.New(
 	// 	options.NodeID, , options ...Option
@@ -79,11 +83,11 @@ func main() {
 	// 	log.L.Error("failed to open store", zap.Error(err))
 	// }
 
-	// h := httpd.New(options.HTTPAddress, s)
-	// if err := h.Start(); err != nil {
-	// 	log.L.Error("failed to start HTTP service", zap.Error(err))
-	// 	os.Exit(1)
-	// }
+	h := httpd.New(options.HTTPAddress, rstore, cluster)
+	if err := h.Start(); err != nil {
+		log.L.Error("failed to start HTTP service", zap.Error(err))
+		os.Exit(1)
+	}
 
 	// // If join was specified, make the join request.
 	// if options.JoinAddress != "" {

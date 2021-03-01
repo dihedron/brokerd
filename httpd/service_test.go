@@ -1,5 +1,6 @@
 package httpd
 
+/*
 import (
 	"bytes"
 	"encoding/json"
@@ -128,3 +129,4 @@ func doDelete(t *testing.T, u, key string) {
 	}
 	defer resp.Body.Close()
 }
+*/
