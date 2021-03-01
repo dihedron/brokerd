@@ -56,7 +56,7 @@ func New(options ...Option) (*Store, error) {
 	return store, nil
 }
 
-// initialise opens and initalises an SQLite3 DB with all
+// initialise opens and initialises an SQLite3 DB with all
 // correct settings.
 func initialise(dsn string, migrations fs.FS) (db *sql.DB, err error) {
 	// ensure a DSN is set before attempting to open the database

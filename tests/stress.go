@@ -16,7 +16,7 @@ import (
 
 const (
 	// WAIT is the time to wait between iterations.
-	WAIT time.Duration = 50 * time.Millisecond
+	WAIT time.Duration = 500 * time.Millisecond
 )
 
 type generator func() string
