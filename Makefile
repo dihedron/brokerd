@@ -20,5 +20,12 @@ openapi-stub:
 openapi-skeleton:
 	@docker run --rm -v "${PWD}:/local" \
 	openapitools/openapi-generator-cli generate -g go-gin-server \
-	-i /local/web/brokerd-oas3.yaml -o /local/web/openapi	
-	@gofmt -w web/openapi/go
+	--additional-properties=apiPath=openapi \
+	-i /local/web/brokerd-oas3.yaml -o /local/web	
+	@gofmt -w web/openapi
+	@rm -rf web/.openapi-generator 
+	@rm -rf web/api 
+	@rm -rf web/.openapi-generator-ignore
+	@rm -rf web/Dockerfile
+	@rm -rf web/main.go
+	@rm -rf web/openapi/README.md

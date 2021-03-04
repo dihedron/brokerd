@@ -9,7 +9,7 @@ import (
 	"github.com/dihedron/brokerd/cluster"
 	"github.com/dihedron/brokerd/kvstore"
 	"github.com/dihedron/brokerd/log"
-	openapi "github.com/dihedron/brokerd/web/openapi/go"
+	"github.com/dihedron/brokerd/web/openapi"
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"

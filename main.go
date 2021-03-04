@@ -9,10 +9,10 @@ import (
 	"os/signal"
 
 	"github.com/dihedron/brokerd/cluster"
-	"github.com/dihedron/brokerd/httpd"
 	"github.com/dihedron/brokerd/kvstore"
 	"github.com/dihedron/brokerd/log"
 	"github.com/dihedron/brokerd/sqlite"
+	"github.com/dihedron/brokerd/web"
 	"github.com/jessevdk/go-flags"
 	"go.uber.org/zap"
 )
@@ -109,11 +109,19 @@ func main() {
 	// 	log.L.Error("failed to open store", zap.Error(err))
 	// }
 
-	h := httpd.New(options.HTTPAddress, rstore, cluster)
-	if err := h.Start(); err != nil {
-		log.L.Error("failed to start HTTP service", zap.Error(err))
+	// h := httpd.New(options.HTTPAddress, rstore, cluster)
+	// if err := h.Start(); err != nil {
+	// 	log.L.Error("failed to start HTTP service", zap.Error(err))
+	// 	os.Exit(1)
+	// }
+
+	ws, err := web.New(options.HTTPAddress, rstore, cluster)
+	if err != nil {
+		log.L.Error("failed to create web service", zap.Error(err))
 		os.Exit(1)
 	}
+
+	go ws.Start()
 
 	// // If join was specified, make the join request.
 	// if options.JoinAddress != "" {
