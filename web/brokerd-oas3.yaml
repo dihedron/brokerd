@@ -1,0 +1,303 @@
+openapi: '3.0.2'
+
+info:
+  title: Brokerd API
+  version: '1.0'
+  description: |
+    This API allows to interact with the `brokerd` daemon in its three different capacities:
+    
+    1. as a **key/value store for properties**, holding key/value pairs;
+    2. as a **Raft cluster member**, through cluster managemenet APIs thata llow to check the state and
+      interact with the cluster (e.g. moving the master to another node, forcing a sync-up of the
+      cluster nodes, etc.)
+    3. as a **relational store for virtual machines and network ports**, as reported by OpenStack via its 
+      notification exchanges inside RabbitMQ.
+
+    The **Properties API** allows to manage the lifecycle of key/value pairs; the kes part can encode a
+    pseudo-hierarchical organisation of the information by adopting conventional characters as field
+    separators, the way it is usually done in Java properties files, e.g.:
+    ```
+    key-part-1.key-part-2.key-part-3....key-part-N=value
+    ``` 
+    where each part of the key (`key-part-X`) can encode some part of a taxonomy.
+
+    The **Cluster API** provides a way to interact with the Raft cluster that guarantees that the Finite
+    State Machines (FSM) holding the state of the several `brokerd` instances running on different 
+    OpenStack controller nodes are all kept in sync and moving in lock-step. Through the API it is possible 
+    to check the health and the status (*leader*, *follower*) of the nodes in the cluster, move the cluster
+    leadership from the current master to a different node, force a sync-up of the cluster nodes, trigger
+    the snaphotting of the current FSM state, etc.
+
+    The **Store API** provides a way to interact with the SQLite database holding information about 
+    Virtual Machines and Network Ports.
+  contact:
+    name: Support Team
+    url: http://www.example.com/support",
+    email: support@example.com
+servers:
+  - url: https://api.server.test/api/v1
+
+# Basic authentication
+security:
+  - BasicAuth: []  
+
+paths:
+  /properties:
+    get:
+      operationId: listProperties
+      summary: Return a (possibly filtered) list of properties.
+      description: |
+        This API allows to **retrieve** the list of **all properties**; if a pattern
+        is specified, the sub-list of properties whose keys match the pattern is
+        returned.
+      tags:
+        - Properties
+      parameters:
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/PageOffset' 
+        - $ref: "#/components/parameters/KeyPattern"     
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/ErrorBadRequest'
+    post:
+      operationId: createProperty
+      summary: Create a new property.
+      description: |
+        This API allows to **create** a new property, given the **key** and the **value**.
+      tags:
+        - Properties        
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Property'
+      responses:
+        '200':
+          description: Successfully created a new setting
+        '400':
+          $ref: '#/components/responses/ErrorBadRequest'
+    delete:
+      operationId: deleteProperties
+      summary: Delete multiple properties.
+      description: |
+        This API allows to **delete all properties**; if a pattern is provided,
+        only properties whose keys match it are deleted.
+      tags:
+        - Properties 
+      parameters:
+        - $ref: "#/components/parameters/KeyPattern"
+      responses:
+        '200':
+          description: OK
+        '400':
+          $ref: '#/components/responses/ErrorBadRequest'
+        '404':
+          $ref: '#/components/responses/ErrorNotFound'
+
+  /settings/{key}:
+    get:
+      operationId: getProperty
+      summary: Retrieve the value of a specific property.
+      description: |
+        This API allow to **retrieve** the **value** of a property given its **key**.
+      tags:
+        - Properties
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string          
+      responses:
+        '200':
+          description: OK
+          
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Property'
+    put:
+      operationId: updateProperty
+      summary: Update the value of an existing property.
+      description: |
+        This API allows to **update** an **existing** property given its **key**.
+      tags:
+        - Properties
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string          
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Property'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/ErrorBadRequest'
+        '404':
+          $ref: '#/components/responses/ErrorNotFound'
+    delete:
+      operationId: deleteProperty
+      summary: Delete a property given its key.
+      description: |
+        This API allow to **delete** a property given its **key**.
+      tags:
+        - Properties
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string          
+      responses:
+        '200':
+          description: OK
+        '400':
+          $ref: '#/components/responses/ErrorBadRequest'
+        '404':
+          $ref: '#/components/responses/ErrorNotFound'
+  
+  /cluster/nodes:
+    get:
+      operationId: listNodes
+      summary: Return the list of all nodes in the Raft cluster.
+      description: |
+        This API allows to **retrieve** the list of **all nodes** in the Raft
+        cluster, along with their state.
+      tags:
+        - Cluster  
+      parameters:
+        - name: status
+          in: query
+          description: Filter based on the node status in the cluster.
+          required: false
+          schema:
+            type: string
+            enum:
+              - leader
+              - follower
+              - candidate
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Node'
+        '400':
+          $ref: '#/components/responses/ErrorBadRequest'
+
+components:
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+
+  schemas:
+    # Schema for property (key/value pair)
+    Property:
+      type: object
+      properties:
+        key:
+          type: string
+          description: The property (unique) key.
+        value:
+          type: string
+          description: The value of the property.
+      required:
+        - key
+
+    # Schema for Raft node
+    Node:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The unique id of the node in the cluster.
+        address:
+          type: string
+          description: The network address of the node.
+        status:
+          type: string
+          enum: 
+            - leader
+            - follower
+            - candidate # check on this
+      required:
+        - id
+
+    # Schema for error response body
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      required:
+        - code
+        - message  
+
+  parameters:
+    PageLimit:
+      name: limit
+      in: query
+      description: Limits the number of items on a page.
+      required: false
+      schema:
+        type: integer      
+    PageOffset:
+      name: offset
+      in: query
+      description: Specifies the page number of the items to be displayed.
+      required: false
+      schema:
+        type: integer
+    KeyPattern:
+      name: pattern
+      in: query
+      description: Regular expression to filter property keys.
+      required: false
+      schema:
+        type: string
+
+  responses:
+    ErrorBadRequest:
+      description: 400 - Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ErrorUnauthorized:
+      description: 401 - Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ErrorNotFound:
+      description: 404 - The specified resource was not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

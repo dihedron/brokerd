@@ -16,6 +16,14 @@ tests/stress
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+# OpenAPI generated stuff
+web/openapi/api
+web/openapi/.openapi-generator
+web/openapi/.openapi-generator-ignore
+web/openapi/Dockerfile
+web/openapi/main.go
+
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 

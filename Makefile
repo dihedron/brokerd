@@ -11,3 +11,14 @@ proto:
 .PHONY: clean
 clean:
 	rm -rf proto/*.pb.go
+
+.PHONY: openapi-stub
+openapi-stub:
+	docker run --rm -v "${PWD}:/local" openapitools/openapi-generator-cli generate -i /local/web/brokerd.yaml -g go -o /local/apiclient
+
+.PHONY: openapi-skeleton
+openapi-skeleton:
+	@docker run --rm -v "${PWD}:/local" \
+	openapitools/openapi-generator-cli generate -g go-gin-server \
+	-i /local/web/brokerd-oas3.yaml -o /local/web/openapi	
+	@gofmt -w web/openapi/go
